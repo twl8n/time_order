@@ -1,15 +1,61 @@
-#!/usr/bin/perl
+#!/opt/local/bin/perl
+
+# /usr/bin/perl
 
 use strict;
+use CGI;
+use CGI::Carp qw(fatalsToBrowser);
+use DBI;
+use HTML::Template;
+use HTML::FillInForm;
+use session_lib;
+use Data::Dumper;
 
 my $global_iter;
 
 # openssl  genrsa  -out /Users/twl/.ssh/to_private.pem  1024
 # openssl rsa -in /Users/twl/.ssh/to_private.pem -pubout -out  /Users/twl/to_public.pem
 
-my $private_key = "%ENV{HOME}/.ssh/to_private.pem";
-my $public_key = `cat $HOME/.ssh/to_public.pem`;
+my $private_key = "/Users/twl/.ssh/to_private.pem";
+my $public_key = `cat /Users/twl/.ssh/to_public.pem`;
 chomp($public_key);
+
+
+main:
+{
+    my $qq = new CGI; 
+    my %ch = $qq->Vars();
+    
+    my $template_text = process_template("index.html");
+    my $template = HTML::Template->new(scalarref => \$template_text,
+                                       die_on_bad_params => 0);
+
+    if (! $ch{state})
+    {
+        $template->param(show_output => "none");
+        $template->param(show_input => "block");
+        # $template->param(recs => \@records);
+        # $template->param(%cf);
+        # $template->param(%ENV);
+
+        # If you wanted to fill in HTML form fields, you'd call
+        # HTML::FillInForm on $output below. The usual reason for doing
+        # this would be to carry state information (values) between
+        # invocations of CGI scripts.
+    }
+    elsif ($ch{state} eq 'encode')
+    {
+        my $uhc = send_response("provide_order", $ch{signed}, $ch{checksum_type}, $ch{pub_key});
+        
+        $template->param(uhc => $uhc);
+        $template->param(show_output => "block");
+        $template->param(show_input => "none");
+    }
+
+    my $output =  $template->output;
+
+    print "Content-Type: text/html; charset=iso-8859-1\n\n$output";
+}
 
 # sub request_error
 # sub extract_id
@@ -20,10 +66,10 @@ chomp($public_key);
 sub encode
 {
     my $msg = $_[0];
-    mktmp($msg, "/tmp/msg.txt");
+    mktmp($msg, "/tmp/msg.txt") || die "mktmp fails\n";
 
-    system("openssl rsautl -sign -inkey $private_key -in /tmp/msg.txt -out /tmp/file.enc");
-    `openssl enc -base64 -in /tmp/file.enc -out /tmp/file.enc.base64`;
+    `openssl rsautl -sign -inkey $private_key -in /tmp/msg.txt -out /tmp/file.enc 2>&1`;
+    `openssl enc -base64 -in /tmp/file.enc -out /tmp/file.enc.base64 2>&1`;
     my $var = `cat /tmp/file.enc.base64`;
     chomp($var);
     return $var;
@@ -38,11 +84,6 @@ sub mktmp
     close(OUT);
 }
 
-main:
-{
-
-    send_response(decode_request());
-}
 
 
 
@@ -69,14 +110,14 @@ sub send_response
     my $request_type = $_[0];
     my @args = @_[1..3];
     no strict;
-    &$request_type(@args);
+    return &$request_type(@args);
 }
 
 sub provide_order
 {
     my $id = $global_iter++;
     my ($check, $type, $your_pub) = @_;
-    print &encode("$check $type $your_pub $id") . " $public_key";
+    return &encode("$check $type $your_pub $id") . " $public_key";
 }
 
 sub reprovide_order
@@ -85,7 +126,7 @@ sub reprovide_order
     my $check = checksum($type, $source);
     my $id = extract_id($message);
     my $your_pub = extract_pub($message);
-    print encode("$check $type $your_pub $id") . " $public_key";
+    return encode("$check $type $your_pub $id") . " $public_key";
 }
 
 sub update_order
