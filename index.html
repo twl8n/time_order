@@ -1,0 +1,65 @@
+<html>
+  <head>
+    <title>
+      Universal Historical Code
+    </title>
+  </head>
+  <body>
+    <div id=input style="display:<!-- tmpl_var name=show_input -->">
+      <form action="index.pl" method="POST">
+        <input type=hidden name=state value=encode>
+        <table>
+          <tr>
+            <td>
+              Signed checksum:
+            </td>
+            <td>
+              <textarea name=signed></textarea>
+            </td>
+          </tr>
+          <tr>
+            <td>
+              Your public key:
+            </td>
+            <td>
+              <textarea name=pub_key></textarea>
+            </td>
+          </tr>
+          <tr>
+            <td>
+              Checksum type:
+            </td>
+            <td>
+              <select name=checksum_type>
+                <option value=sha1 selected>sha1</option>
+                <option value=sha224>sha224</option>
+                <option value=sha256>sha256</option>
+                <option value=sha384>sha384</option>
+                <option value=sha512>sha512</option>
+              </select>
+            </td>
+            </tr>
+          <tr>
+            <td>
+            </td>
+            <td>
+              <br>
+              <input type=submit name=submit value=Submit>
+            </td>
+          </tr>
+        </table>
+      </form>
+    </div>
+    
+      <!-- tmpl_loop name=recs -->
+      de_pk: <!-- tmpl_var name=de_pk --> name: <!-- tmpl_var name=name --> uc: <!-- tmpl_var name=update_count -->
+      <br>
+      <!-- /tmpl_loop -->
+      
+      <div id=output style="display:<!-- tmpl_var name=show_output -->">
+        Your UHC:
+        <br>
+        <pre><!-- tmpl_var name=uhc --></pre>
+      </div>
+  </body>
+</html>

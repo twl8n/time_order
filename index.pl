@@ -11,7 +11,7 @@ use HTML::FillInForm;
 use session_lib;
 use Data::Dumper;
 
-my $global_iter;
+# my $global_iter;
 
 # openssl  genrsa  -out /Users/twl/.ssh/to_private.pem  1024
 # openssl rsa -in /Users/twl/.ssh/to_private.pem -pubout -out  /Users/twl/to_public.pem
@@ -100,7 +100,7 @@ sub encode
     `openssl enc -base64 -in /tmp/file.enc -out /tmp/file.enc.base64 2>&1`;
     my $var = `cat /tmp/file.enc.base64`;
     chomp($var);
-    return "$msg $var";
+    return "$msg\n$var";
 }
 
 sub mktmp
@@ -125,6 +125,7 @@ sub send_response
     my $request_type = $_[0];
     my @args = @_[1..3];
     no strict;
+    # Only provide_order for now.
     return &$request_type(@args);
 }
 
@@ -178,17 +179,37 @@ sub ck_type
     return '';
 }
 
+sub next_iter
+{
+    my $dbh = get_db_handle('uhc.db');
+    #die `echo 'insert into uhc_data values (NULL);' | sqlite3 uhc.db`;
+    my $sql = "insert into uhc_data  values (null);";
+    # my $sql = "select * from uhc_data";
+    my $sth = $dbh->prepare($sql);
+
+    if ($dbh->err()) { die "1\n$DBI::errstr\n"; }
+    $sth->execute();
+    if ($dbh->err()) { die "2\n$DBI::errstr\n"; }
+    # die Dumper($sth->fetchrow_hashref());
+    commit_handle('uhc.db');
+
+    my $iter = $dbh->last_insert_id('', '', 'uhc_data', '');
+    return $iter;
+}
+
 
 sub provide_order
 {
-    my $id = $global_iter++;
     my ($check, $type, $your_pub) = @_;
+    chomp($check);
+    chomp($your_pub);
+    my $id = next_iter();
 
     my $checksum = decode($check, $your_pub);
 
     if ($type eq ck_type($checksum))
     {
-        return &encode("$check $type $your_pub $id") . " $public_key";
+        return &encode("$check\n$type\n$your_pub\n$id") . "\n$public_key";
     }
     return $checksum;
 }
