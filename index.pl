@@ -20,7 +20,6 @@ my $private_key = "/Users/twl/.ssh/to_private.pem";
 my $public_key = `cat /Users/twl/.ssh/to_public.pem`;
 chomp($public_key);
 
-
 main:
 {
     my $qq = new CGI; 
@@ -47,6 +46,9 @@ main:
     {
         my $uhc = send_response("provide_order", $ch{signed}, $ch{checksum_type}, $ch{pub_key});
         
+        # Maybe later we'll care if the $uhc says "error: yada yada,
+        # but for now just spew it out.
+
         $template->param(uhc => $uhc);
         $template->param(show_output => "block");
         $template->param(show_input => "none");
@@ -56,6 +58,28 @@ main:
 
     print "Content-Type: text/html; charset=iso-8859-1\n\n$output";
 }
+
+sub internal_decode
+{
+    my $str = $ARGV[0];
+    
+    $str =~ m/(.*) (-----BEGIN PUBLIC KEY-----.*-----END PUBLIC KEY-----.*)/s;
+    my $enc = $1;
+    my $key = $2;
+
+    mktmp($enc, "/tmp/decodeme.base64");
+    `openssl enc -base64 -d -in /tmp/decodeme.base64 -out /tmp/decodeme.dat`;
+
+    $enc = `cat /tmp/decodeme.dat`;
+    chomp($enc);
+    
+    mktmp($enc, "/tmp/tmp.enc");
+    mktmp($key, "/tmp/time_order.pub");
+    `openssl rsautl -verify -inkey /tmp/time_order.pub -pubin -in /tmp/tmp.enc -out /tmp/decrypted.txt`;
+   # print `cat /tmp/decrypted.txt`;
+}
+
+
 
 # sub request_error
 # sub extract_id
@@ -68,11 +92,15 @@ sub encode
     my $msg = $_[0];
     mktmp($msg, "/tmp/msg.txt") || die "mktmp fails\n";
 
-    `openssl rsautl -sign -inkey $private_key -in /tmp/msg.txt -out /tmp/file.enc 2>&1`;
+    # -o return match, -P Perl extended
+
+    `shasum /tmp/msg.txt | grep -oP '^\\w+' > /tmp/hash.txt`;
+    # die "openssl rsautl -sign -inkey $private_key -in /tmp/hash.txt -out /tmp/file.enc 2>&1";
+    `openssl rsautl -sign -inkey $private_key -in /tmp/hash.txt -out /tmp/file.enc 2>&1`;
     `openssl enc -base64 -in /tmp/file.enc -out /tmp/file.enc.base64 2>&1`;
     my $var = `cat /tmp/file.enc.base64`;
     chomp($var);
-    return $var;
+    return "$msg $var";
 }
 
 sub mktmp
@@ -85,22 +113,9 @@ sub mktmp
 }
 
 
-
-
 sub listen
 {
     # daemons use this
-}
-
-sub decode_request
-{
-    return ("provide_order", @ARGV);
-
-    # if (/(<signed checksum>) (<checksum type>) (<public key>)/ 
-    #     return ("provide_order",$1, $2, $3);
-    # if /(<order message>) (<my pubic key>) (<digital source of original
-    #                                         signature>) (<new checksum type>)/ return ("update_order", $1-4);
-    # return ("request_error" $arg)
 }
 
 
@@ -113,11 +128,69 @@ sub send_response
     return &$request_type(@args);
 }
 
+sub decode
+{
+    my $enc = $_[0];
+    my $key = $_[1];
+    my $err = "";
+
+    mktmp($enc, "/tmp/decodeme.base64");
+
+    # Take a base64 string and decode it back to normal data, binary.
+
+    `openssl enc -base64 -d -in /tmp/decodeme.base64 -out /tmp/decodeme.dat`;
+    
+    if ($?)
+    {
+        $err = "error: opensssl base64 encode fails\n";
+        return $err;
+    }
+
+    $enc = `cat /tmp/decodeme.dat`;
+    chomp($enc);
+    
+    mktmp($enc, "/tmp/tmp.enc");
+    mktmp($key, "/tmp/time_order.pub");
+    `openssl rsautl -verify -inkey /tmp/time_order.pub -pubin -in /tmp/tmp.enc -out /tmp/decrypted.txt`;
+
+    if ($?)
+    {
+        $err = "error: openssl rsautl verify fails\n";
+        return $err;
+    }
+
+    return `cat /tmp/decrypted.txt`;
+}
+
+
+sub ck_type
+{
+    if ($_[0] =~ m/\b[0-9a-f]{5,40}\b/)
+    {
+        # http://stackoverflow.com/questions/468370/a-regex-to-match-a-sha1
+        return 'sha1';
+    }
+    elsif ($_[0] =~ m/^\$6\$/)
+    {
+        # http://www.freebsd.org/doc/en_US.ISO8859-1/books/handbook/crypt.html
+        return 'sha256';
+    }
+    return '';
+}
+
+
 sub provide_order
 {
     my $id = $global_iter++;
     my ($check, $type, $your_pub) = @_;
-    return &encode("$check $type $your_pub $id") . " $public_key";
+
+    my $checksum = decode($check, $your_pub);
+
+    if ($type eq ck_type($checksum))
+    {
+        return &encode("$check $type $your_pub $id") . " $public_key";
+    }
+    return $checksum;
 }
 
 sub reprovide_order
