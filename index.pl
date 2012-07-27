@@ -16,15 +16,20 @@ use Data::Dumper;
 # openssl  genrsa  -out /Users/twl/.ssh/to_private.pem  1024
 # openssl rsa -in /Users/twl/.ssh/to_private.pem -pubout -out  /Users/twl/to_public.pem
 
-my $private_key = "/Users/twl/.ssh/to_private.pem";
-my $public_key = `cat /Users/twl/.ssh/to_public.pem`;
-chomp($public_key);
+my $private_key = "";
+my $public_key_str = ""; 
 
 main:
 {
     my $qq = new CGI; 
     my %ch = $qq->Vars();
     
+    my %cf = app_config();
+
+    $private_key = $cf{private_key};
+    $public_key = `cat $cf{public_key}`;
+    chomp($public_key);
+
     my $template_text = process_template("index.html");
     my $template = HTML::Template->new(scalarref => \$template_text,
                                        die_on_bad_params => 0);
