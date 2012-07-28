@@ -18,14 +18,17 @@ use Data::Dumper;
 
 my $private_key = "";
 my $public_key = ""; 
+my $fp = "";
 
 main:
 {
     my $qq = new CGI; 
     my %ch = $qq->Vars();
     
+    # app_config reads the local .app_config which contains only a redirect.
     my %cf = app_config();
 
+    $fp = $cf{file_path};
     $private_key = $cf{private_key};
     $public_key = `cat $cf{public_key}`;
     chomp($public_key);
@@ -49,7 +52,13 @@ main:
     }
     elsif ($ch{state} eq 'encode')
     {
-        my $uhc = send_response("provide_order", $ch{signed}, $ch{checksum_type}, $ch{pub_key});
+        # untaint(foo, 1) newline_flag, preserve \s
+
+        my $signed = untaint($ch{signed}, 1);
+        my $checksum_type = untaint($ch{checksum_type});
+        my $pub_key = untaint($ch{pub_key}, 1);
+        
+        my $uhc = send_response("provide_order", $signed, $checksum_type, $pub_key);
         
         # Maybe later we'll care if the $uhc says "error: yada yada,
         # but for now just spew it out.
@@ -72,16 +81,16 @@ sub internal_decode
     my $enc = $1;
     my $key = $2;
 
-    mktmp($enc, "/tmp/decodeme.base64");
-    `openssl enc -base64 -d -in /tmp/decodeme.base64 -out /tmp/decodeme.dat`;
+    mktmp($enc, "$fp/decodeme.base64");
+    `openssl enc -base64 -d -in $fp/decodeme.base64 -out $fp/decodeme.dat`;
 
-    $enc = `cat /tmp/decodeme.dat`;
+    $enc = `cat $fp/decodeme.dat`;
     chomp($enc);
     
-    mktmp($enc, "/tmp/tmp.enc");
-    mktmp($key, "/tmp/time_order.pub");
-    `openssl rsautl -verify -inkey /tmp/time_order.pub -pubin -in /tmp/tmp.enc -out /tmp/decrypted.txt`;
-   # print `cat /tmp/decrypted.txt`;
+    mktmp($enc, "$fp/tmp.enc");
+    mktmp($key, "$fp/time_order.pub");
+    `openssl rsautl -verify -inkey $fp/time_order.pub -pubin -in $fp/tmp.enc -out $fp/decrypted.txt`;
+   # print `cat $fp/decrypted.txt`;
 }
 
 
@@ -95,15 +104,15 @@ sub internal_decode
 sub encode
 {
     my $msg = $_[0];
-    mktmp($msg, "/tmp/msg.txt") || die "mktmp fails\n";
+    mktmp($msg, "$fp/msg.txt") || die "mktmp fails\n";
 
     # -o return match, -P Perl extended
 
-    `shasum /tmp/msg.txt | grep -oP '^\\w+' > /tmp/hash.txt`;
-    # die "openssl rsautl -sign -inkey $private_key -in /tmp/hash.txt -out /tmp/file.enc 2>&1";
-    `openssl rsautl -sign -inkey $private_key -in /tmp/hash.txt -out /tmp/file.enc 2>&1`;
-    `openssl enc -base64 -in /tmp/file.enc -out /tmp/file.enc.base64 2>&1`;
-    my $var = `cat /tmp/file.enc.base64`;
+    `shasum $fp/msg.txt | grep -oP '^\\w+' > $fp/hash.txt`;
+    # die "openssl rsautl -sign -inkey $private_key -in $fp/hash.txt -out $fp/file.enc 2>&1";
+    `openssl rsautl -sign -inkey $private_key -in $fp/hash.txt -out $fp/file.enc 2>&1`;
+    `openssl enc -base64 -in $fp/file.enc -out $fp/file.enc.base64 2>&1`;
+    my $var = `cat $fp/file.enc.base64`;
     chomp($var);
     return "$msg\n$var";
 }
@@ -140,11 +149,16 @@ sub decode
     my $key = $_[1];
     my $err = "";
 
-    mktmp($enc, "/tmp/decodeme.base64");
+    mktmp($enc, "$fp/decodeme.base64");
 
     # Take a base64 string and decode it back to normal data, binary.
 
-    `openssl enc -base64 -d -in /tmp/decodeme.base64 -out /tmp/decodeme.dat`;
+# oMpMHQ5mNcPrlA9UUYY+LbfSEzQUrEL1hRBWhNzUMuo0J6nT9jJqf3bxFPNMNR8u
+# /vo8+OjxvL7kDMcBg63xlYRB/xypmqv7o4wF10YkEQ3RxObS9LYJdv1mBomLRGy/
+# Oc0Z3gLAIEfwva8ifrUxymF2RLiq397+TlKF6EVs9vI=
+
+
+    `openssl enc -base64 -d -in $fp/decodeme.base64 -out $fp/decodeme.dat`;
     
     if ($?)
     {
@@ -152,20 +166,21 @@ sub decode
         return $err;
     }
 
-    $enc = `cat /tmp/decodeme.dat`;
+    $enc = `cat $fp/decodeme.dat`;
     chomp($enc);
     
-    mktmp($enc, "/tmp/tmp.enc");
-    mktmp($key, "/tmp/time_order.pub");
-    `openssl rsautl -verify -inkey /tmp/time_order.pub -pubin -in /tmp/tmp.enc -out /tmp/decrypted.txt`;
+    mktmp($enc, "$fp/tmp.enc");
+    mktmp($key, "$fp/time_order.pub");
+    my $cmd = "openssl rsautl -verify -inkey $fp/time_order.pub -pubin -in $fp/tmp.enc -out $fp/decrypted.txt";
+    `$cmd`;
 
     if ($?)
     {
-        $err = "error: openssl rsautl verify fails\n";
+        $err = "error: openssl rsautl verify fails:\n$cmd\n";
         return $err;
     }
 
-    return `cat /tmp/decrypted.txt`;
+    return `cat $fp/decrypted.txt`;
 }
 
 

