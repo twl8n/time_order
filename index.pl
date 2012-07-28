@@ -1,13 +1,13 @@
-#!/opt/local/bin/perl
+#!/usr/bin/perl
 
-# /usr/bin/perl
+# #!/opt/local/bin/perl
 
 use strict;
 use CGI;
 use CGI::Carp qw(fatalsToBrowser);
 use DBI;
 use HTML::Template;
-use HTML::FillInForm;
+# use HTML::FillInForm;
 use session_lib;
 use Data::Dumper;
 
@@ -17,7 +17,7 @@ use Data::Dumper;
 # openssl rsa -in /Users/twl/.ssh/to_private.pem -pubout -out  /Users/twl/to_public.pem
 
 my $private_key = "";
-my $public_key_str = ""; 
+my $public_key = ""; 
 
 main:
 {
@@ -32,7 +32,7 @@ main:
 
     my $template_text = process_template("index.html");
     my $template = HTML::Template->new(scalarref => \$template_text,
-                                       die_on_bad_params => 0);
+                                       die_on_bad_params => 1);
 
     if (! $ch{state})
     {
